@@ -1,12 +1,14 @@
 
-import React , { Component, PropTypes } from 'react';
-
+import React , { Component } from 'react';
+import PropTypes from 'prop-types';
 import ReactNative, {
   DeviceEventEmitter,
-  NativeModules
+  Keyboard,
+  NativeModules,
+  InteractionManager
 } from 'react-native';
 
-var ScrollViewManager = NativeModules.ScrollViewManager;
+const ScrollViewManager = NativeModules.ScrollViewManager;
 
 export default class KeyboardAwareBase extends Component {
   constructor(props) {
@@ -22,9 +24,10 @@ export default class KeyboardAwareBase extends Component {
   }
   
   _addKeyboardEventListeners() {
+    const KeyboardEventsObj = Keyboard || DeviceEventEmitter;
     this.keyboardEventListeners = [
-      DeviceEventEmitter.addListener('keyboardWillShow', this._onKeyboardWillShow),
-      DeviceEventEmitter.addListener('keyboardWillHide', this._onKeyboardWillHide)
+      KeyboardEventsObj.addListener('keyboardWillShow', this._onKeyboardWillShow),
+      KeyboardEventsObj.addListener('keyboardWillHide', this._onKeyboardWillHide)
     ];
   }
   
@@ -57,10 +60,12 @@ export default class KeyboardAwareBase extends Component {
   _updateKeyboardAwareViewContentSize() {
     if(ScrollViewManager && ScrollViewManager.getContentSize) {
       ScrollViewManager.getContentSize(ReactNative.findNodeHandle(this._keyboardAwareView), (res)=> {
-        this._keyboardAwareView.contentSize = res;
-        if(this.state.scrollBottomOnNextSizeChange) {
-          this.scrollToBottom();
-          this.state.scrollBottomOnNextSizeChange = false;
+        if(this._keyboardAwareView) {
+          this._keyboardAwareView.contentSize = res;
+          if(this.state.scrollBottomOnNextSizeChange) {
+            this.scrollToBottom();
+            this.state.scrollBottomOnNextSizeChange = false;
+          }
         }
       })
     }
@@ -73,11 +78,16 @@ export default class KeyboardAwareBase extends Component {
   _scrollToFocusedTextInput() {
     if (this.props.getTextInputRefs) {
       const textInputRefs = this.props.getTextInputRefs();
-      textInputRefs.forEach((textInputRef) => {
-        if (textInputRef.isFocused()) {
-          this._keyboardAwareView.getScrollResponder().scrollResponderScrollNativeHandleToKeyboard(
-              ReactNative.findNodeHandle(textInputRef), 50 + (this.props.scrollOffset || 0), true);
+      textInputRefs.some((textInputRef, index, array) => {
+        const isFocusedFunc = textInputRef.isFocused();
+        const isFocused = isFocusedFunc && (typeof isFocusedFunc === "function") ? isFocusedFunc() : isFocusedFunc;
+        if (isFocused) {
+          setTimeout(() => {
+            this._keyboardAwareView.getScrollResponder().scrollResponderScrollNativeHandleToKeyboard(
+              ReactNative.findNodeHandle(textInputRef), this.props.scrollToInputAdditionalOffset, true);
+          }, 0);
         }
+        return isFocused;
       });
     }
   }
@@ -101,7 +111,8 @@ export default class KeyboardAwareBase extends Component {
     const keyboardHeight = this.state.keyboardHeight;
     this.setState({keyboardHeight: 0});
 
-    const yOffset = Math.max(this._keyboardAwareView.contentOffset.y - keyboardHeight, 0);
+    const hasYOffset = this._keyboardAwareView && this._keyboardAwareView.contentOffset && this._keyboardAwareView.contentOffset.y !== undefined;
+    const yOffset = hasYOffset ? Math.max(this._keyboardAwareView.contentOffset.y - keyboardHeight, 0) : 0;
     this._keyboardAwareView.scrollTo({x: 0, y: yOffset, animated: true});
   }
 
@@ -121,13 +132,18 @@ export default class KeyboardAwareBase extends Component {
       this._keyboardAwareView.scrollTo({x: 0, y: bottomYOffset, animated: scrollAnimated});
     }
   }
+  scrollTo(options) {
+    if (this._keyboardAwareView) this._keyboardAwareView.scrollTo(options);
+  }
 }
 
 KeyboardAwareBase.propTypes = {
   startScrolledToBottom: PropTypes.bool,
-  scrollToBottomOnKBShow: PropTypes.bool
+  scrollToBottomOnKBShow: PropTypes.bool,
+  scrollToInputAdditionalOffset: PropTypes.number
 };
 KeyboardAwareBase.defaultProps = {
   startScrolledToBottom: false,
-  scrollToBottomOnKBShow: false
+  scrollToBottomOnKBShow: false,
+  scrollToInputAdditionalOffset: 75
 };
